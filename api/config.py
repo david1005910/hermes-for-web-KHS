@@ -298,6 +298,10 @@ _FALLBACK_MODELS = [
     {'provider': 'Anthropic', 'id': 'anthropic/claude-sonnet-4.6',      'label': 'Claude Sonnet 4.6'},
     {'provider': 'Anthropic', 'id': 'anthropic/claude-sonnet-4-5',      'label': 'Claude Sonnet 4.5'},
     {'provider': 'Anthropic', 'id': 'anthropic/claude-haiku-3-5',       'label': 'Claude Haiku 3.5'},
+    {'provider': 'Qwen / Vision', 'id': 'qwen2-vl:7b',                   'label': 'Qwen2-VL 7B'},
+    {'provider': 'Qwen / Vision', 'id': 'qwen2-vl:2b',                   'label': 'Qwen2-VL 2B'},
+    {'provider': 'Qwen / Vision', 'id': 'qwen-vl-max',                   'label': 'Qwen-VL Max'},
+    {'provider': 'Qwen / Vision', 'id': 'qwen/qwen-2-vl-72b-instruct',   'label': 'Qwen2-VL 72B'},
     {'provider': 'Other',     'id': 'google/gemini-2.5-pro',            'label': 'Gemini 2.5 Pro'},
     {'provider': 'Other',     'id': 'deepseek/deepseek-chat-v3-0324',   'label': 'DeepSeek V3'},
     {'provider': 'Other',     'id': 'meta-llama/llama-4-scout',         'label': 'Llama 4 Scout'},
@@ -475,10 +479,10 @@ def get_available_models() -> dict:
     default_model = DEFAULT_MODEL
     groups = []
 
-    # 1. Read config.yaml model section
+    # 1. Read config.yaml model section dynamically
+    current_cfg = get_config()
     cfg_base_url = ''  # must be defined before conditional blocks (#117)
-    model_cfg = cfg.get('model', {})
-    cfg_base_url = ''
+    model_cfg = current_cfg.get('model', {})
     if isinstance(model_cfg, str):
         default_model = model_cfg
     elif isinstance(model_cfg, dict):
@@ -575,21 +579,24 @@ def get_available_models() -> dict:
     if all_env.get('DEEPSEEK_API_KEY'):
         detected_providers.add('deepseek')
 
-    # 3. Fetch models from custom endpoint if base_url is configured
+    # 3. Fetch models from custom endpoint or local endpoints (Ollama/LM Studio)
     auto_detected_models = []
-    if cfg_base_url:
+    target_urls = [cfg_base_url] if cfg_base_url else ['http://localhost:11434/v1', 'http://localhost:1234/v1']
+    for candidate_url in target_urls:
+        if not candidate_url:
+            continue
         try:
             import ipaddress
             import urllib.request
 
-            # Normalize the base_url and build models endpoint
-            base_url = cfg_base_url.strip()
+            base_url = candidate_url.strip().rstrip('/')
             if base_url.endswith('/v1'):
-                endpoint_url = base_url[:-3] + '/models'
+                endpoint_url = base_url + '/models'
+            elif '/v1/' in base_url:
+                endpoint_url = base_url.split('/v1/')[0] + '/v1/models'
             else:
                 endpoint_url = base_url + '/v1/models'
 
-            # Detect provider from base_url
             provider = 'custom'
             parsed = urlparse(base_url if '://' in base_url else f'http://{base_url}')
             host = (parsed.netloc or parsed.path).lower()
@@ -598,16 +605,15 @@ def get_available_models() -> dict:
                 try:
                     addr = ipaddress.ip_address(parsed.hostname)
                     if addr.is_private or addr.is_loopback or addr.is_link_local:
-                        if 'ollama' in host or '127.0.0.1' in host or 'localhost' in host:
+                        if 'ollama' in host or '11434' in host or '127.0.0.1' in host or 'localhost' in host:
                             provider = 'ollama'
-                        elif 'lmstudio' in host or 'lm-studio' in host:
+                        elif 'lmstudio' in host or 'lm-studio' in host or '1234' in host:
                             provider = 'lmstudio'
                         else:
                             provider = 'local'
                 except ValueError:
                     pass
 
-            # Resolve API key from environment
             headers = {}
             api_key_vars = ('HERMES_API_KEY', 'HERMES_OPENAI_API_KEY', 'OPENAI_API_KEY',
                             'LOCAL_API_KEY', 'OPENROUTER_API_KEY', 'API_KEY')
@@ -617,14 +623,12 @@ def get_available_models() -> dict:
                     headers['Authorization'] = f'Bearer {api_key}'
                     break
 
-            # Fetch model list from endpoint
             req = urllib.request.Request(endpoint_url, method='GET')
             for k, v in headers.items():
                 req.add_header(k, v)
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=3) as response:
                 data = json.loads(response.read().decode('utf-8'))
 
-            # Handle both OpenAI-compatible and llama.cpp response formats
             models_list = []
             if 'data' in data and isinstance(data['data'], list):
                 models_list = data['data']
@@ -637,17 +641,25 @@ def get_available_models() -> dict:
                 model_id = model.get('id', '') or model.get('name', '') or model.get('model', '')
                 model_name = model.get('name', '') or model.get('model', '') or model_id
                 if model_id and model_name:
-                    auto_detected_models.append({'id': model_id, 'label': model_name})
+                    if not any(m['id'] == model_id for m in auto_detected_models):
+                        auto_detected_models.append({'id': model_id, 'label': model_name})
                     detected_providers.add(provider.lower())
         except Exception:
-            pass  # custom endpoint unreachable or misconfigured -- fail silently
+            pass  # local endpoint unreachable or misconfigured -- fail silently
 
     # 5. Build model groups
+    if auto_detected_models:
+        groups.append({
+            'provider': 'Local LLM (Ollama / Local)',
+            'models': auto_detected_models,
+        })
+
     if detected_providers:
         for pid in sorted(detected_providers):
             provider_name = _PROVIDER_DISPLAY.get(pid, pid.title())
+            if pid in ('ollama', 'lmstudio', 'local', 'custom'):
+                continue
             if pid == 'openrouter':
-                # OpenRouter uses provider/model format -- show the fallback list
                 groups.append({
                     'provider': 'OpenRouter',
                     'models': [{'id': m['id'], 'label': m['label']} for m in _FALLBACK_MODELS],
@@ -657,21 +669,9 @@ def get_available_models() -> dict:
                     'provider': provider_name,
                     'models': _PROVIDER_MODELS[pid],
                 })
-            else:
-                # Unknown provider -- use auto-detected models if available,
-                # otherwise fall back to default model placeholder
-                if auto_detected_models:
-                    groups.append({
-                        'provider': provider_name,
-                        'models': auto_detected_models,
-                    })
-                else:
-                    groups.append({
-                        'provider': provider_name,
-                        'models': [{'id': default_model, 'label': default_model.split('/')[-1]}],
-                    })
-    else:
-        # No providers detected -- use fallback grouped list
+    
+    if not groups:
+        # No providers or local models detected -- use fallback grouped list
         by_provider = {}
         for m in _FALLBACK_MODELS:
             by_provider.setdefault(m['provider'], []).append(
@@ -703,6 +703,142 @@ def get_available_models() -> dict:
         'active_provider': active_provider,
         'default_model': default_model,
         'groups': groups,
+    }
+
+
+def test_local_llm_endpoint(base_url: str, api_key: str = None) -> dict:
+    """
+    Test connectivity to a local LLM OpenAI-compatible endpoint.
+    Example base_url: http://localhost:11434/v1, http://localhost:1234/v1
+    """
+    if not base_url:
+        return {'ok': False, 'error': 'base_url is required'}
+
+    base_url = base_url.strip().rstrip('/')
+    if base_url.endswith('/v1'):
+        endpoint_url = base_url + '/models'
+    elif '/v1/' in base_url:
+        endpoint_url = base_url.split('/v1/')[0] + '/v1/models'
+    else:
+        endpoint_url = base_url + '/v1/models'
+
+    import urllib.request
+    import json
+    from urllib.parse import urlparse
+    import ipaddress
+
+    headers = {}
+    if api_key:
+        headers['Authorization'] = f'Bearer {api_key.strip()}'
+
+    # Auto-detect provider
+    provider = 'custom'
+    try:
+        parsed = urlparse(base_url if '://' in base_url else f'http://{base_url}')
+        host = (parsed.netloc or parsed.path).lower()
+        if 'ollama' in host or '11434' in host:
+            provider = 'ollama'
+        elif 'lmstudio' in host or 'lm-studio' in host or '1234' in host:
+            provider = 'lmstudio'
+        elif 'vllm' in host or '8000' in host:
+            provider = 'vllm'
+        elif parsed.hostname:
+            try:
+                addr = ipaddress.ip_address(parsed.hostname)
+                if addr.is_private or addr.is_loopback or addr.is_link_local:
+                    provider = 'local'
+            except ValueError:
+                pass
+    except Exception:
+        pass
+
+    try:
+        req = urllib.request.Request(endpoint_url, method='GET')
+        for k, v in headers.items():
+            req.add_header(k, v)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+
+        models_list = []
+        if 'data' in data and isinstance(data['data'], list):
+            models_list = data['data']
+        elif 'models' in data and isinstance(data['models'], list):
+            models_list = data['models']
+
+        res_models = []
+        for m in models_list:
+            if not isinstance(m, dict):
+                continue
+            mid = m.get('id', '') or m.get('name', '') or m.get('model', '')
+            mname = m.get('name', '') or m.get('model', '') or mid
+            if mid:
+                res_models.append({'id': mid, 'label': mname})
+
+        return {
+            'ok': True,
+            'provider': provider,
+            'endpoint_url': endpoint_url,
+            'models': res_models,
+            'count': len(res_models)
+        }
+    except Exception as e:
+        return {
+            'ok': False,
+            'error': f'Could not connect to {endpoint_url}: {str(e)}'
+        }
+
+
+def save_local_llm_config(provider: str, base_url: str, default_model: str, api_key: str = None) -> dict:
+    """
+    Save Local LLM configuration to config.yaml and reload config.
+    """
+    config_path = _get_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    import yaml
+    current_cfg = {}
+    if config_path.exists():
+        try:
+            loaded = yaml.safe_load(config_path.read_text())
+            if isinstance(loaded, dict):
+                current_cfg = loaded
+        except Exception:
+            current_cfg = {}
+
+    model_sec = current_cfg.get('model')
+    if not isinstance(model_sec, dict):
+        model_sec = {}
+
+    model_sec['provider'] = provider or 'custom'
+    model_sec['base_url'] = base_url.strip() if base_url else ''
+    model_sec['ollama_num_ctx'] = 64000
+    if default_model:
+        model_sec['default'] = default_model.strip()
+
+    current_cfg['model'] = model_sec
+
+    # Write config.yaml
+    with open(config_path, 'w', encoding='utf-8') as f:
+        yaml.dump(current_cfg, f, allow_unicode=True, sort_keys=False)
+
+    # Save API key to .env if provided
+    if api_key and api_key.strip():
+        try:
+            env_path = config_path.parent / '.env'
+            lines = []
+            if env_path.exists():
+                lines = env_path.read_text().splitlines()
+            new_lines = [l for l in lines if not l.startswith('LOCAL_API_KEY=') and not l.startswith('HERMES_API_KEY=')]
+            new_lines.append(f'LOCAL_API_KEY="{api_key.strip()}"')
+            env_path.write_text('\n'.join(new_lines) + '\n')
+        except Exception:
+            pass
+
+    reload_config()
+    return {
+        'ok': True,
+        'config_path': str(config_path),
+        'model_config': model_sec,
     }
 
 

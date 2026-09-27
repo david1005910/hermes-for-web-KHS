@@ -452,6 +452,7 @@
   .quick-action.setup-pack[data-pack="memory-sync"]{border-color:rgba(168,139,250,.24);background:linear-gradient(180deg,rgba(168,139,250,.08),rgba(168,139,250,.02));}
   .quick-action.setup-pack[data-pack="last30days"], .quick-action.setup-pack[data-pack="autoresearch"]{border-color:rgba(72,187,120,.24);background:linear-gradient(180deg,rgba(72,187,120,.08),rgba(72,187,120,.02));}
   .quick-action.setup-pack[data-pack="hermes-full-install"], .quick-action.setup-pack[data-pack="webui-only-install"]{border-color:rgba(245,158,11,.28);background:linear-gradient(180deg,rgba(245,158,11,.09),rgba(245,158,11,.02));}
+  .quick-action.setup-pack[data-pack="local-llm-setup"]{border-color:rgba(168,139,250,.35);background:linear-gradient(180deg,rgba(168,139,250,.12),rgba(168,139,250,.03));}
   .artifact-bar{padding:8px 20px 0;flex-shrink:0;background:linear-gradient(to bottom,var(--topbar-bg),transparent);}
   .artifact-bar-inner{max-width:980px;margin:0 auto;background:var(--input-bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px;display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;}
   .artifact-bar-group{flex:1;min-width:0;}

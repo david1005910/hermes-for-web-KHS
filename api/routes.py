@@ -16,6 +16,7 @@ from api.config import (
     STATE_DIR, SESSION_DIR, DEFAULT_WORKSPACE, DEFAULT_MODEL,
     SESSIONS, SESSIONS_MAX, LOCK, STREAMS, STREAMS_LOCK, CANCEL_FLAGS,
     SERVER_START_TIME, CLI_TOOLSETS, _INDEX_HTML_PATH, get_available_models,
+    test_local_llm_endpoint, save_local_llm_config,
     IMAGE_EXTS, MD_EXTS, MIME_MAP, MAX_FILE_BYTES, MAX_UPLOAD_BYTES,
     CHAT_LOCK, load_settings, save_settings,
 )
@@ -325,6 +326,23 @@ def handle_post(handler, parsed) -> bool:
         return handle_upload(handler)
 
     body = read_body(handler)
+
+    if parsed.path == '/api/models/test-local':
+        res = test_local_llm_endpoint(
+            base_url=body.get('base_url', ''),
+            api_key=body.get('api_key')
+        )
+        return j(handler, res)
+
+    if parsed.path == '/api/models/local-setup':
+        res = save_local_llm_config(
+            provider=body.get('provider', 'custom'),
+            base_url=body.get('base_url', ''),
+            default_model=body.get('default_model', ''),
+            api_key=body.get('api_key')
+        )
+        res['available_models'] = get_available_models()
+        return j(handler, res)
 
     if parsed.path == '/api/session/new':
         s = new_session(workspace=body.get('workspace'), model=body.get('model'))
@@ -744,7 +762,7 @@ def _handle_sse_stream(handler, parsed):
                 handler.wfile.flush()
                 continue
             _sse(handler, event, data)
-            if event in ('done', 'error', 'cancel'):
+            if event in ('done', 'error', 'cancel', 'apperror'):
                 break
     except (BrokenPipeError, ConnectionResetError):
         pass

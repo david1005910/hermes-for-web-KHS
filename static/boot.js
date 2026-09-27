@@ -534,7 +534,8 @@ const SETUP_PACK_TEMPLATES={
   'hermes-full-install':'Hermes 를 처음 쓰는 사용자를 위한 Full Hermes Install pack 을 실행해줘. https://github.com/NousResearch/hermes-agent 와 https://github.com/reallygood83/hermes-for-web 를 기준으로, Hermes Agent 설치부터 필요한 의존성, 기본 설정, Telegram 연결 가능 여부 점검, WebUI 실행 준비까지 한 번에 진행해줘. 이미 설치된 항목은 재사용하고, 초보자도 이해할 수 있게 단계와 결과를 요약해줘.',
   'webui-only-install':'이미 Hermes Agent 를 쓰는 사용자를 위한 WebUI-only Install pack 을 실행해줘. https://github.com/reallygood83/hermes-for-web 를 설치 또는 업데이트하고, localhost:8788 기준 실행 준비, Cherry Blossom 기본 테마, Assistant Name, Setup Packs, Artifact/Workspace 흐름까지 점검해줘.',
   'last30days':'last30days research pack 을 설치/점검해줘. 사용자가 최근 30일간 X/Reddit 기반 반응 조사를 쉽게 시작할 수 있도록 last30days 사용법, 소스 선택법(x/reddit/both), 대표 예시, 필수 전제 조건을 정리하고 가능한 환경 점검을 진행해줘.',
-  'autoresearch':'AutoResearch pack 을 설치/점검해줘. 사용자가 조사 질문을 넣으면 리서치 흐름을 반복 실행하거나 심화 탐색할 수 있도록 기본 구조, 추천 워크플로우, 필요한 도구/전제 조건, 결과 정리 방식을 설명하고 가능한 환경 점검을 진행해줘.'
+  'autoresearch':'AutoResearch pack 을 설치/점검해줘. 사용자가 조사 질문을 넣으면 리서치 흐름을 반복 실행하거나 심화 탐색할 수 있도록 기본 구조, 추천 워크플로우, 필요한 도구/전제 조건, 결과 정리 방식을 설명하고 가능한 환경 점검을 진행해줘.',
+  'local-llm-setup':'로컬 LLM (Ollama, LM Studio, vLLM, Darwin 등) 연동을 시작할 수 있게 점검하고 설정해줘. 내 PC의 Ollama(http://localhost:11434/v1) 또는 LM Studio(http://localhost:1234/v1) 엔드포인트 연결 가능 여부를 확인하고, config.yaml 설정 방법과 사용 가능한 로컬 모델 선택법을 안내해줘.'
 };
 const SETUP_PACK_DESCRIPTIONS={
   'obsidian-starter':'Obsidian 중심 note workflow 를 시작하는 기본 세팅 팩',
@@ -545,7 +546,8 @@ const SETUP_PACK_DESCRIPTIONS={
   'hermes-full-install':'Hermes Agent 설치부터 Telegram/WebUI 준비까지 한 번에 시작하는 풀 설치 팩',
   'webui-only-install':'이미 Hermes 사용자라면 WebUI 만 빠르게 붙이는 설치 팩',
   'last30days':'최근 30일간 X/Reddit 반응 조사를 빠르게 시작하는 연구 팩',
-  'autoresearch':'질문을 반복 조사/심화 탐색 workflow 로 키우는 리서치 팩'
+  'autoresearch':'질문을 반복 조사/심화 탐색 workflow 로 키우는 리서치 팩',
+  'local-llm-setup':'Ollama, LM Studio, vLLM 등 로컬 LLM을 Hermes에 연동하는 설정 팩'
 };
 const SETUP_PACK_DETAILS={
   'obsidian-starter':{title:'Obsidian Starter',who:'Obsidian 중심으로 Hermes 를 시작하려는 사용자',outcome:['노트 workflow 점검','Obsidian 친화 markdown 흐름 정리','기본 note 작성 스타트']},
@@ -556,7 +558,8 @@ const SETUP_PACK_DETAILS={
   'hermes-full-install':{title:'Full Hermes Install',who:'Hermes 를 처음 설치하는 완전 초보 사용자',outcome:['Hermes Agent 설치 흐름 시작','Telegram / WebUI 연결 준비','초보자용 설치 요약 확보']},
   'webui-only-install':{title:'WebUI-only Install',who:'이미 Hermes Agent 를 쓰고 있고 WebUI 만 붙이고 싶은 사용자',outcome:['WebUI 설치/업데이트','localhost:8788 실행 준비','테마/팩/아티팩트 기본 점검']},
   'last30days':{title:'last30days',who:'최근 30일간 X/Reddit 반응 조사를 빠르게 하고 싶은 사용자',outcome:['x/reddit/both 사용법 이해','반응 조사 워크플로우 시작','리서치 입력 예시 확보']},
-  'autoresearch':{title:'AutoResearch',who:'질문 하나를 반복 조사/심화 탐색 흐름으로 키우고 싶은 사용자',outcome:['조사 워크플로우 틀 확보','다음 탐색 포인트 설계','note/brief 로 연결하기 쉬운 출력 확보']}
+  'autoresearch':{title:'AutoResearch',who:'질문 하나를 반복 조사/심화 탐색 흐름으로 키우고 싶은 사용자',outcome:['조사 워크플로우 틀 확보','다음 탐색 포인트 설계','note/brief 로 연결하기 쉬운 출력 확보']},
+  'local-llm-setup':{title:'Local LLM Setup',who:'로컬 PC의 Ollama, LM Studio, vLLM 등 로컬 LLM을 연동하려는 사용자',outcome:['로컬 API 엔드포인트 점검','config.yaml model base_url 설정','로컬 모델 선택 및 실행 준비']}
 };
 document.querySelectorAll('.setup-pack').forEach(btn=>{
   btn.dataset.desc = SETUP_PACK_DESCRIPTIONS[btn.dataset.pack] || '이 setup pack 이 하는 일을 설명합니다.';

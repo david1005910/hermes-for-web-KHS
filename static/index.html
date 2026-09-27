@@ -181,6 +181,7 @@
         <button class="quick-action setup-pack" data-pack="webui-only-install">🪄 WebUI-only Install</button>
         <button class="quick-action setup-pack" data-pack="last30days">📈 last30days</button>
         <button class="quick-action setup-pack" data-pack="autoresearch">🔬 AutoResearch</button>
+        <button class="quick-action setup-pack" data-pack="local-llm-setup">🦙 Local LLM Setup</button>
       </div>
       <div class="setup-pack-help" id="setupPackHelpSidebar">팩 위에 마우스를 올리면 설명이 보입니다. 클릭하면 해당 환경/흐름을 점검하고 설치·설정 작업을 시작합니다.</div>
       <div class="setup-pack-detail" id="setupPackDetailSidebar"></div>
@@ -210,6 +211,12 @@
           <option value="anthropic/claude-sonnet-4.6">Claude Sonnet 4.6</option>
           <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5</option>
           <option value="anthropic/claude-haiku-3-5">Claude Haiku 3.5</option>
+        </optgroup>
+        <optgroup label="Qwen / Vision">
+          <option value="qwen2-vl:7b">Qwen2-VL 7B (Ollama)</option>
+          <option value="qwen2-vl:2b">Qwen2-VL 2B (Ollama)</option>
+          <option value="qwen-vl-max">Qwen-VL Max</option>
+          <option value="qwen/qwen-2-vl-72b-instruct">Qwen2-VL 72B (OpenRouter)</option>
         </optgroup>
         <optgroup label="Other">
           <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
@@ -249,6 +256,7 @@
           <div class="profile-dropdown" id="profileDropdown"></div>
         </div>
         <div class="chip model" id="modelChip">GPT-5.4 Mini</div>
+        <button class="chip local-llm-btn" id="btnLocalLlm" onclick="openLocalLlmModal()" title="로컬 LLM (Ollama / LM Studio) 연동 설정" style="cursor:pointer;background:rgba(168,139,250,.18);border:1px solid rgba(168,139,250,.4);color:var(--text);font-weight:600">🦙 Local LLM</button>
 
         <button class="chip clear-btn" id="btnClearConv" onclick="clearConversation()" title="이 대화의 메시지 전체 지우기" style="display:none">&#128465; 지우기</button>
         <button class="chip gear-btn" id="btnSettings" onclick="toggleSettings()" title="설정">&#9881;</button>
@@ -309,6 +317,7 @@
           <button class="quick-action setup-pack" data-pack="webui-only-install">🪄 WebUI-only Install</button>
           <button class="quick-action setup-pack" data-pack="last30days">📈 last30days</button>
           <button class="quick-action setup-pack" data-pack="autoresearch">🔬 AutoResearch</button>
+          <button class="quick-action setup-pack" data-pack="local-llm-setup">🦙 Local LLM Setup</button>
         </div>
         <div class="setup-pack-help" id="setupPackHelp">팩을 눌러 설치/설정 흐름을 시작하세요. 각 팩은 “이 기능이 뭔지”보다 “내가 뭘 하려는지” 기준으로 묶여 있습니다.</div>
         <div class="setup-pack-detail" id="setupPackDetail"></div>
@@ -615,6 +624,11 @@
         </label>
         <div style="font-size:11px;color:var(--muted);margin-top:4px">Mirrors WebUI token usage to state.db so <code>hermes /insights</code> includes browser session data. Off by default.</div>
       </div>
+      <div class="settings-field" style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+        <label>로컬 LLM (Ollama / LM Studio) 연동</label>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">내 PC에서 실행 중인 로컬 LLM 서버를 Hermes에 연동합니다.</div>
+        <button class="sm-btn" onclick="openLocalLlmModal();_closeSettingsPanel()" style="width:100%;padding:8px;font-weight:600;background:rgba(168,139,250,.18);border-color:rgba(168,139,250,.4)">🦙 Local LLM 연동 설정 열기</button>
+      </div>
       <div class="settings-field" style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px">
         <label for="settingsPassword">Access Password</label>
         <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Enter a new password to set or change it. Leave blank to keep current setting.</div>
@@ -623,6 +637,55 @@
       <button class="sm-btn" onclick="saveSettings()" style="margin-top:12px;width:100%;padding:8px;font-weight:600">Save Settings</button>
       <button class="sm-btn" id="btnDisableAuth" onclick="disableAuth()" style="margin-top:6px;width:100%;padding:8px;font-weight:600;color:#e8a030;border-color:rgba(232,160,48,.3);display:none">Disable Auth</button>
       <button class="sm-btn" id="btnSignOut" onclick="signOut()" style="margin-top:6px;width:100%;padding:8px;font-weight:600;color:var(--accent);border-color:rgba(233,69,96,.3);display:none">Sign Out</button>
+    </div>
+  </div>
+</div>
+<div class="artifact-modal-overlay" id="localLlmModalOverlay" style="display:none">
+  <div class="artifact-modal" style="max-width:540px">
+    <div class="artifact-modal-header">
+      <h3 style="margin:0;font-size:16px;display:flex;align-items:center;gap:6px">🦙 Local LLM 연동 설정</h3>
+      <button class="panel-icon-btn" onclick="closeLocalLlmModal()" title="Close">&#10005;</button>
+    </div>
+    <div class="artifact-modal-body">
+      <div class="setup-pack-help" style="margin-top:0;margin-bottom:12px">
+        로컬 PC에서 실행 중인 LLM(Ollama, LM Studio, vLLM, llama.cpp 등)과 Hermes를 연동합니다.
+      </div>
+
+      <div class="settings-field">
+        <label>빠른 프리셋 선택</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+          <button class="cron-btn" onclick="selectLocalLlmPreset('ollama')">🦙 Ollama (11434)</button>
+          <button class="cron-btn" onclick="selectLocalLlmPreset('lmstudio')">🤖 LM Studio (1234)</button>
+          <button class="cron-btn" onclick="selectLocalLlmPreset('vllm')">⚡ vLLM (8000)</button>
+          <button class="cron-btn" onclick="selectLocalLlmPreset('custom')">🔧 사용자 정의</button>
+        </div>
+      </div>
+
+      <div class="settings-field">
+        <label for="localLlmBaseUrl">엔드포인트 URL (base_url)</label>
+        <input id="localLlmBaseUrl" placeholder="예: http://localhost:11434/v1" value="http://localhost:11434/v1" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px;font-family:monospace" />
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">OpenAI 호환 v1 엔드포인트 URL을 입력해 주세요.</div>
+      </div>
+
+      <div class="settings-field">
+        <label for="localLlmApiKey">API Key (선택)</label>
+        <input id="localLlmApiKey" type="password" placeholder="필요한 경우 입력 (Ollama/LMStudio는 보통 비워둡니다)" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px" />
+      </div>
+
+      <div style="margin-bottom:12px">
+        <button class="sm-btn" onclick="testLocalLlmConnection()" style="width:100%;padding:8px;font-weight:600;background:rgba(124,185,255,.15);border-color:rgba(124,185,255,.35)">🔍 연결 테스트 및 모델 목록 가져오기</button>
+      </div>
+
+      <div id="localLlmTestResult" style="display:none;margin-bottom:12px;padding:10px;border-radius:8px;font-size:12px;line-height:1.5"></div>
+
+      <div class="settings-field" id="localLlmModelWrap" style="display:none">
+        <label for="localLlmDefaultModel">기본 사용 모델 선택</label>
+        <select id="localLlmDefaultModel" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px"></select>
+      </div>
+    </div>
+    <div class="artifact-modal-footer">
+      <button class="artifact-action" onclick="closeLocalLlmModal()">취소</button>
+      <button class="artifact-action primary" id="btnSaveLocalLlm" onclick="saveLocalLlmConfigAction()" disabled>💾 로컬 LLM 적용</button>
     </div>
   </div>
 </div>

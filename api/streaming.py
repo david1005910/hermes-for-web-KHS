@@ -54,6 +54,115 @@ def _sanitize_messages_for_api(messages):
     return clean
 
 
+def _run_direct_llm_streaming(session_id, model, msg_text, put, on_token, s):
+    """
+    Direct LLM streaming fallback when AIAgent is not installed.
+    Supports Ollama, LM Studio, vLLM, and any OpenAI-compatible API.
+    """
+    from api.config import resolve_model_provider, get_config
+    import urllib.request
+    import json
+
+    resolved_model, resolved_provider, resolved_base_url = resolve_model_provider(model)
+    cfg = get_config()
+    model_cfg = cfg.get('model', {})
+
+    base_url = resolved_base_url or (model_cfg.get('base_url') if isinstance(model_cfg, dict) else '')
+    if not base_url:
+        if resolved_provider == 'ollama':
+            base_url = 'http://localhost:11434/v1'
+        elif resolved_provider == 'lmstudio':
+            base_url = 'http://localhost:1234/v1'
+        elif resolved_provider == 'vllm':
+            base_url = 'http://localhost:8000/v1'
+        else:
+            base_url = 'http://localhost:11434/v1'
+
+    base_url = base_url.strip().rstrip('/')
+    if base_url.endswith('/v1'):
+        chat_url = base_url + '/chat/completions'
+    elif '/v1/' in base_url:
+        chat_url = base_url.split('/v1/')[0] + '/v1/chat/completions'
+    else:
+        chat_url = base_url + '/v1/chat/completions'
+
+    # Build messages
+    messages = []
+    messages.append({'role': 'system', 'content': f'Active workspace at session start: {s.workspace}'})
+    for m in _sanitize_messages_for_api(s.messages):
+        if isinstance(m, dict) and m.get('role') in ('user', 'assistant', 'system'):
+            messages.append({'role': m['role'], 'content': m.get('content', '')})
+
+    messages.append({'role': 'user', 'content': f'[Workspace: {s.workspace}]\n' + msg_text})
+
+    target_model = resolved_model or (model_cfg.get('default') if isinstance(model_cfg, dict) else '') or 'default'
+
+    payload = {
+        'model': target_model,
+        'messages': messages,
+        'stream': True,
+    }
+
+    headers = {'Content-Type': 'application/json'}
+    api_key = os.getenv('LOCAL_API_KEY') or os.getenv('OPENAI_API_KEY') or os.getenv('HERMES_API_KEY')
+    if api_key:
+        headers['Authorization'] = f'Bearer {api_key}'
+
+    req = urllib.request.Request(chat_url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
+
+    full_reply = ""
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            for line in resp:
+                line_str = line.decode('utf-8').strip()
+                if not line_str or line_str.startswith(':'):
+                    continue
+                if line_str.startswith('data: '):
+                    data_str = line_str[6:].strip()
+                    if data_str == '[DONE]':
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk.get('choices', [{}])[0].get('delta', {})
+                        content = delta.get('content')
+                        if content:
+                            full_reply += content
+                            on_token(content)
+                    except Exception:
+                        pass
+    except Exception as e:
+        err_msg = f"로컬 LLM 연결 오류 ({chat_url}): {str(e)}"
+        on_token(f"\n[{err_msg}]\n")
+        full_reply += f"\n[{err_msg}]\n"
+
+    # Save to session messages with deduplication check
+    already_has_user_msg = False
+    if s.messages:
+        last_m = s.messages[-1]
+        if isinstance(last_m, dict) and last_m.get('role') == 'user':
+            c = str(last_m.get('content', ''))
+            if c == msg_text or c.endswith(msg_text):
+                already_has_user_msg = True
+
+    now_ts = int(time.time())
+    if not already_has_user_msg:
+        s.messages.append({'role': 'user', 'content': msg_text, 'timestamp': now_ts})
+
+    s.messages.append({'role': 'assistant', 'content': full_reply, 'timestamp': now_ts})
+    s.title = title_from(s.messages, s.title)
+    s.save()
+
+    usage = {
+        'input_tokens': len(msg_text) // 4,
+        'output_tokens': len(full_reply) // 4,
+        'estimated_cost': 0.0,
+    }
+    put('done', {
+        'session': s.compact() | {'messages': s.messages, 'tool_calls': getattr(s, 'tool_calls', []) or []},
+        'usage': usage,
+    })
+
+
 def _sse(handler, event, data):
     """Write one SSE event to the response stream."""
     payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -139,7 +248,8 @@ def _run_agent_streaming(session_id, msg_text, model, workspace, stream_id, atta
                         put('approval', p)
 
             if AIAgent is None:
-                raise ImportError("AIAgent not available -- check that hermes-agent is on sys.path")
+                _run_direct_llm_streaming(session_id, model, msg_text, put, on_token, s)
+                return
             resolved_model, resolved_provider, resolved_base_url = resolve_model_provider(model)
 
             # Resolve API key via Hermes runtime provider (matches gateway behaviour)
@@ -181,41 +291,52 @@ def _run_agent_streaming(session_id, msg_text, model, workspace, stream_id, atta
                 _fallback_resolved = None
 
             print(f"[webui-debug] resolved_model={resolved_model} resolved_provider={resolved_provider} resolved_base_url={resolved_base_url}", flush=True)
-            agent = AIAgent(
-                model=resolved_model,
-                provider=resolved_provider,
-                base_url=resolved_base_url,
-                api_key=resolved_api_key,
-                platform='cli',
-                quiet_mode=True,
-                enabled_toolsets=_toolsets,
-                fallback_model=_fallback_resolved,
-                session_id=session_id,
-                stream_delta_callback=on_token,
-                tool_progress_callback=on_tool,
-            )
-            # Prepend workspace context so the agent always knows which directory
-            # to use for file operations, regardless of session age or AGENTS.md defaults.
-            workspace_ctx = f"[Workspace: {s.workspace}]\n"
-            workspace_system_msg = (
-                f"Active workspace at session start: {s.workspace}\n"
-                "Every user message is prefixed with [Workspace: /absolute/path] indicating the "
-                "workspace the user has selected in the web UI at the time they sent that message. "
-                "This tag is the single authoritative source of the active workspace and updates "
-                "with every message. It overrides any prior workspace mentioned in this system "
-                "prompt, memory, or conversation history. Always use the value from the most recent "
-                "[Workspace: ...] tag as your default working directory for ALL file operations: "
-                "write_file, read_file, search_files, terminal workdir, and patch. "
-                "Never fall back to a hardcoded path when this tag is present."
-            )
-            result = agent.run_conversation(
-                user_message=workspace_ctx + msg_text,
-                system_message=workspace_system_msg,
-                conversation_history=_sanitize_messages_for_api(s.messages),
-                task_id=session_id,
-                persist_user_message=msg_text,
-            )
-            s.messages = result.get('messages') or s.messages
+            try:
+                agent = AIAgent(
+                    model=resolved_model,
+                    provider=resolved_provider,
+                    base_url=resolved_base_url,
+                    api_key=resolved_api_key,
+                    platform='cli',
+                    quiet_mode=True,
+                    enabled_toolsets=_toolsets,
+                    fallback_model=_fallback_resolved,
+                    session_id=session_id,
+                    stream_delta_callback=on_token,
+                    tool_progress_callback=on_tool,
+                )
+                workspace_ctx = f"[Workspace: {s.workspace}]\n"
+                workspace_system_msg = (
+                    f"Active workspace at session start: {s.workspace}\n"
+                    "Every user message is prefixed with [Workspace: /absolute/path] indicating the "
+                    "workspace the user has selected in the web UI at the time they sent that message. "
+                    "This tag is the single authoritative source of the active workspace and updates "
+                    "with every message. It overrides any prior workspace mentioned in this system "
+                    "prompt, memory, or conversation history. Always use the value from the most recent "
+                    "[Workspace: ...] tag as your default working directory for ALL file operations: "
+                    "write_file, read_file, search_files, terminal workdir, and patch. "
+                    "Never fall back to a hardcoded path when this tag is present."
+                )
+                result = agent.run_conversation(
+                    user_message=workspace_ctx + msg_text,
+                    system_message=workspace_system_msg,
+                    conversation_history=_sanitize_messages_for_api(s.messages),
+                    task_id=session_id,
+                    persist_user_message=msg_text,
+                )
+                err_text = str(result.get('error') or '')
+                last_msgs = result.get('messages') or []
+                last_content = str(last_msgs[-1].get('content', '')) if last_msgs else ''
+                if 'does not support tools' in err_text or 'does not support tools' in last_content or 'context window' in err_text or 'context window' in last_content or not result.get('completed', True):
+                    if 'does not support tools' in err_text or 'does not support tools' in last_content or 'context window' in err_text or 'context window' in last_content:
+                        print(f"[webui] AIAgent returned tool/context error, falling back to direct LLM streaming", flush=True)
+                        _run_direct_llm_streaming(session_id, model, msg_text, put, on_token, s)
+                        return
+                s.messages = result.get('messages') or s.messages
+            except Exception as _agent_err:
+                print(f"[webui] AIAgent failed ({_agent_err}), falling back to direct LLM streaming", flush=True)
+                _run_direct_llm_streaming(session_id, model, msg_text, put, on_token, s)
+                return
 
             # ── Handle context compression side effects ──
             # If compression fired inside run_conversation, the agent may have

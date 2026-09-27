@@ -1059,3 +1059,147 @@ async function uploadPendingFiles(){
   return names;
 }
 
+let _testedLocalModels = [];
+
+function openLocalLlmModal() {
+  const modal = $('localLlmModalOverlay');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  const resultDiv = $('localLlmTestResult');
+  if (resultDiv) resultDiv.style.display = 'none';
+  const modelWrap = $('localLlmModelWrap');
+  if (modelWrap) modelWrap.style.display = 'none';
+  const saveBtn = $('btnSaveLocalLlm');
+  if (saveBtn) saveBtn.disabled = true;
+}
+
+function closeLocalLlmModal() {
+  const modal = $('localLlmModalOverlay');
+  if (modal) modal.style.display = 'none';
+}
+
+function selectLocalLlmPreset(type) {
+  const urlInput = $('localLlmBaseUrl');
+  if (!urlInput) return;
+  if (type === 'ollama') {
+    urlInput.value = 'http://localhost:11434/v1';
+  } else if (type === 'lmstudio') {
+    urlInput.value = 'http://localhost:1234/v1';
+  } else if (type === 'vllm') {
+    urlInput.value = 'http://localhost:8000/v1';
+  } else if (type === 'custom') {
+    urlInput.value = 'http://127.0.0.1:8080/v1';
+  }
+}
+
+async function testLocalLlmConnection() {
+  const url = ($('localLlmBaseUrl')?.value || '').trim();
+  const apiKey = ($('localLlmApiKey')?.value || '').trim();
+  const resultDiv = $('localLlmTestResult');
+  const modelWrap = $('localLlmModelWrap');
+  const modelSelect = $('localLlmDefaultModel');
+  const saveBtn = $('btnSaveLocalLlm');
+
+  if (!url) {
+    showToast('엔드포인트 URL을 입력해 주세요.');
+    return;
+  }
+
+  if (resultDiv) {
+    resultDiv.style.display = 'block';
+    resultDiv.style.background = 'rgba(124,185,255,.08)';
+    resultDiv.style.border = '1px solid rgba(124,185,255,.25)';
+    resultDiv.style.color = 'var(--text)';
+    resultDiv.innerHTML = '🔍 로컬 LLM 서버 연결 확인 중...';
+  }
+
+  try {
+    const res = await api('/api/models/test-local', {
+      method: 'POST',
+      body: JSON.stringify({ base_url: url, api_key: apiKey }),
+    });
+
+    if (res.ok) {
+      _testedLocalModels = res.models || [];
+      const count = res.count || _testedLocalModels.length;
+      const providerStr = (res.provider || 'local').toUpperCase();
+
+      if (resultDiv) {
+        resultDiv.style.background = 'rgba(72,187,120,.12)';
+        resultDiv.style.border = '1px solid rgba(72,187,120,.4)';
+        resultDiv.style.color = '#48bb78';
+        resultDiv.innerHTML = `✅ 연결 성공! (${providerStr}) ${count}개의 사용 가능한 모델을 발견했습니다.`;
+      }
+
+      if (modelSelect && _testedLocalModels.length > 0) {
+        modelSelect.innerHTML = _testedLocalModels
+          .map(m => `<option value="${esc(m.id)}">${esc(m.label || m.id)}</option>`)
+          .join('');
+        if (modelWrap) modelWrap.style.display = 'block';
+      } else if (modelSelect) {
+        modelSelect.innerHTML = '<option value="default">default</option>';
+        if (modelWrap) modelWrap.style.display = 'block';
+      }
+
+      if (saveBtn) saveBtn.disabled = false;
+    } else {
+      if (resultDiv) {
+        resultDiv.style.background = 'rgba(233,69,96,.12)';
+        resultDiv.style.border = '1px solid rgba(233,69,96,.4)';
+        resultDiv.style.color = '#e94560';
+        resultDiv.innerHTML = `❌ 연결 실패: ${esc(res.error || '서버가 응답하지 않습니다.')}<br><span style="font-size:11px;opacity:.8">Ollama 또는 LM Studio가 실행 중인지 확인해 주세요.</span>`;
+      }
+      if (saveBtn) saveBtn.disabled = true;
+    }
+  } catch (e) {
+    if (resultDiv) {
+      resultDiv.style.background = 'rgba(233,69,96,.12)';
+      resultDiv.style.border = '1px solid rgba(233,69,96,.4)';
+      resultDiv.style.color = '#e94560';
+      resultDiv.innerHTML = `❌ 오류 발생: ${esc(e.message)}`;
+    }
+    if (saveBtn) saveBtn.disabled = true;
+  }
+}
+
+async function saveLocalLlmConfigAction() {
+  const url = ($('localLlmBaseUrl')?.value || '').trim();
+  const apiKey = ($('localLlmApiKey')?.value || '').trim();
+  const selectedModel = $('localLlmDefaultModel')?.value || '';
+  const saveBtn = $('btnSaveLocalLlm');
+
+  if (!url) return;
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    const res = await api('/api/models/local-setup', {
+      method: 'POST',
+      body: JSON.stringify({
+        base_url: url,
+        api_key: apiKey,
+        default_model: selectedModel,
+        provider: 'custom',
+      }),
+    });
+
+    if (res.ok) {
+      showToast('🎉 로컬 LLM 설정이 성공적으로 저장되었습니다!');
+      closeLocalLlmModal();
+      if (typeof loadModels === 'function') {
+        await loadModels();
+      }
+      if (selectedModel && $('modelSelect')) {
+        $('modelSelect').value = selectedModel;
+        if (typeof updateModelChip === 'function') updateModelChip();
+      }
+    } else {
+      showToast('설정 저장 실패: ' + (res.error || '알 수 없는 오류'));
+    }
+  } catch (e) {
+    showToast('오류 발생: ' + e.message);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+
